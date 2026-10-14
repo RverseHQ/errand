@@ -58,6 +58,14 @@ class Queue:
 
         return self.store.get(id)
 
+    def running(self) -> list[Job]:
+        """未到终态的差事快照, 按提交顺序
+
+        包括被中断后等待下次启动重跑的差事, 不保证每件都正在执行
+        """
+
+        return self.store.running()
+
     async def __aenter__(self) -> Self:
         """启动队列并重跑上次未办完的差事"""
 

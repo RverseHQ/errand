@@ -28,6 +28,7 @@ a real workload needs them, and the code is refactored then, not prepared in adv
 | `@queue.handler(kind)` | Register an async handler for a kind of job. |
 | `queue.submit(kind, payload)` | Persist a job, start it, and return its id. |
 | `queue.get(id)` | Read a snapshot of a job, or `None`. |
+| `queue.running()` | List snapshots of unfinished jobs in submission order, including interrupted ones awaiting rerun. |
 | `async with queue` | Rerun interrupted jobs on enter. Cancel running jobs on exit. |
 | `Job` | `id`, `kind`, `payload`, `status`, `result`, `error`. |
 | `Status` | `running`, `done`, `failed`. |
