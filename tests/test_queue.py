@@ -100,6 +100,33 @@ def test_interrupted_job_reruns_after_restart(tmp_path: Path) -> None:
     assert runs == [id, id]
 
 
+def test_lists_unfinished_jobs(tmp_path: Path) -> None:
+    queue = Queue(tmp_path / "q.db")
+    gate = asyncio.Event()
+
+    @queue.handler("wait")
+    async def wait(job: Job) -> None:
+        await gate.wait()
+
+    @queue.handler("echo")
+    async def echo(job: Job) -> object:
+        return job.payload
+
+    async def main() -> None:
+        async with queue:
+            first = queue.submit("wait", {"n": 1})
+            done = queue.submit("echo", None)
+            second = queue.submit("wait", {"n": 2})
+            await settle(queue, done)
+            assert [(job.id, job.payload) for job in queue.running()] == [(first, {"n": 1}), (second, {"n": 2})]
+            gate.set()
+            await settle(queue, second)
+            await settle(queue, first)
+            assert queue.running() == []
+
+    asyncio.run(main())
+
+
 def test_rejects_submit_outside_lifespan_and_unknown_kind(tmp_path: Path) -> None:
     queue = Queue(tmp_path / "q.db")
 
