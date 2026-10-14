@@ -19,17 +19,18 @@ a real workload needs them, and the code is refactored then, not prepared in adv
 - Failure is a result. A raised exception ends the job as `failed`. Nothing retries.
 - JSON in, JSON out. Payloads and results are stored as JSON.
 - Event loop only. Call the queue from the thread that runs the loop.
+- Lifespan owns the connection. The database is open only inside `async with queue`.
 
 ## API
 
 | API | Purpose |
 | --- | --- |
-| `Queue(path)` | Open or create a queue backed by a SQLite file. |
+| `Queue(path)` | Create a queue backed by a SQLite file, opened on enter. |
 | `@queue.handler(kind)` | Register an async handler for a kind of job. |
 | `queue.submit(kind, payload)` | Persist a job, start it, and return its id. |
 | `queue.get(id)` | Read a snapshot of a job, or `None`. |
 | `queue.running()` | List snapshots of unfinished jobs in submission order, including interrupted ones awaiting rerun. |
-| `async with queue` | Rerun interrupted jobs on enter. Cancel running jobs on exit. |
+| `async with queue` | Open the database and rerun interrupted jobs on enter. Cancel running jobs and close the database on exit. |
 | `Job` | `id`, `kind`, `payload`, `status`, `result`, `error`. |
 | `Status` | `running`, `done`, `failed`. |
 
@@ -157,7 +158,8 @@ async def crash() -> str:
         id = queue.submit("work", None)
         await asyncio.sleep(0)
 
-    assert queue.get(id).status is Status.RUNNING
+        assert queue.get(id).status is Status.RUNNING
+
     return id
 
 

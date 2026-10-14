@@ -86,8 +86,8 @@ def test_interrupted_job_reruns_after_restart(tmp_path: Path) -> None:
             id = queue.submit("long", None)
             while not runs:
                 await asyncio.sleep(0.01)
-        job = queue.get(id)
-        assert job is not None and job.status is Status.RUNNING
+            job = queue.get(id)
+            assert job is not None and job.status is Status.RUNNING
         return id
 
     async def second(id: str) -> None:
@@ -141,5 +141,31 @@ def test_rejects_submit_outside_lifespan_and_unknown_kind(tmp_path: Path) -> Non
         async with queue:
             with pytest.raises(KeyError):
                 queue.submit("nope", None)
+
+    asyncio.run(main())
+
+
+def test_closes_database_on_exit_and_reopens_on_enter(tmp_path: Path) -> None:
+    path = tmp_path / "q.db"
+    queue = Queue(path)
+
+    @queue.handler("echo")
+    async def echo(job: Job) -> object:
+        return job.payload
+
+    async def main() -> None:
+        async with queue:
+            id = queue.submit("echo", 1)
+            await settle(queue, id)
+            with pytest.raises(RuntimeError):
+                async with queue:
+                    pass
+        with pytest.raises(RuntimeError):
+            queue.get(id)
+        for file in tmp_path.iterdir():
+            file.unlink()
+        async with queue:
+            assert queue.get(id) is None
+            await settle(queue, queue.submit("echo", 2))
 
     asyncio.run(main())
