@@ -1,48 +1,75 @@
 # errand
 
-单进程内的持久化异步任务队列。提交即落盘 SQLite 并立刻起跑，重启后把没办完的从头重跑。
+进程内的持久化异步任务队列。
 
-它只解决一件事：**接下的活不因重启而丢**。回调、兜底结果、模型并发都归业务和 Loom。
+一个 SQLite 文件，一个事件循环。没有 broker，没有 worker 进程，没有配置。
 
-- 处理函数会被至少执行一次，需要容忍重跑
-- 抛异常即失败，不重试，需要兜底就在处理函数里自己兜
-- 只能在事件循环所在线程使用，同一个数据库文件只允许一个进程使用
+## 保证
 
-## 用法
+- 提交即落盘。进程退出，任务不丢。
+- 至少执行一次。中断的任务在下次启动时从头重跑。
+- 终态唯一。返回即 `done`，抛出即 `failed`。
+
+## 不做
+
+- 重试。失败是结果，不是事件。兜底在处理函数内完成。
+- 限流。并发上限属于被限制的资源，不属于队列。
+- 调度、优先级、超时、定时。
+- 多进程。一个数据库文件，一个进程。
+- 跨线程。只在事件循环所在线程调用。
+
+## 原则
+
+写可能有用的最简单的代码。
+
+每一项能力都对应一个已经发生的问题。没有发生的问题，没有代码。
+
+过度设计比过度抽象更昂贵。需求会生长，代码随之重构，而不是预先为它铺路。
+
+## 接口
 
 ```python
+import asyncio
+
 from errand import Job, Queue
 
-queue = Queue("data/errand.sqlite3")
+queue = Queue("errand.sqlite3")
 
 
-@queue.handler("analysis")
-async def analysis(job: Job) -> dict:
-    request = AnalysisTaskRequest.model_validate(job.payload)
-    try:
-        result = await run_turn(request)
-    except Exception:
-        result = fallback_result(request)
-    await callback(request.callback_url, job.id, result)
-    return result
+@queue.handler("summarize")
+async def summarize(job: Job) -> str:
+    return await llm(job.payload["text"])
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+async def main() -> None:
     async with queue:
-        yield
+        id = queue.submit("summarize", {"text": "..."})
+        job = queue.get(id)
 
 
-@app.post("/analysis-tasks")
-async def create(body: AnalysisTaskRequest) -> dict:
-    return {"task_id": queue.submit("analysis", body.model_dump(mode="json"))}
-
-
-@app.get("/analysis-tasks/{task_id}")
-async def read(task_id: str) -> dict:
-    job = queue.get(task_id)
-    ...
+asyncio.run(main())
 ```
+
+| | |
+|---|---|
+| `Queue(path)` | 打开或创建队列 |
+| `@queue.handler(kind)` | 注册处理函数，`async (Job) -> JSON` |
+| `queue.submit(kind, payload) -> str` | 落盘、起跑、返回标识 |
+| `queue.get(id) -> Job \| None` | 读取快照 |
+| `async with queue` | 进入时重跑中断的任务，退出时取消在办的任务 |
+
+```
+running ──→ done
+        └─→ failed
+```
+
+## 安装
+
+```bash
+uv add git+https://github.com/RverseHQ/errand
+```
+
+Python 3.13+。无运行时依赖。
 
 ## 开发
 
