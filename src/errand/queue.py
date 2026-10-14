@@ -84,9 +84,7 @@ class Queue:
         """办理一件差事并落下结果"""
 
         try:
-            result = await self.handlers[job.kind](job)
+            self.store.finish(job.id, await self.handlers[job.kind](job))
         except Exception as error:
             logger.exception("差事失败: id=%s kind=%s", job.id, job.kind)
             self.store.fail(job.id, f"{type(error).__name__}: {error}")
-        else:
-            self.store.finish(job.id, result)

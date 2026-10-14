@@ -49,6 +49,22 @@ def test_records_failure(tmp_path: Path) -> None:
     asyncio.run(main())
 
 
+def test_unencodable_result_fails_instead_of_hanging(tmp_path: Path) -> None:
+    queue = Queue(tmp_path / "q.db")
+
+    @queue.handler("odd")
+    async def odd(job: Job) -> object:
+        return object()
+
+    async def main() -> None:
+        async with queue:
+            job = await settle(queue, queue.submit("odd", None))
+            assert job.status is Status.FAILED
+            assert job.error is not None and job.error.startswith("TypeError")
+
+    asyncio.run(main())
+
+
 def test_interrupted_job_reruns_after_restart(tmp_path: Path) -> None:
     runs: list[str] = []
 
