@@ -7,7 +7,9 @@ authors = [
     { name = "rainzee wang", email = "rainzee.w@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "msgspec>=0.22.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.24,<0.13.0"]
@@ -15,6 +17,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "pydantic>=2.14.1",
     "pytest>=9.1.1",
     "ruff>=0.17.0",
     "ty>=0.0.87",

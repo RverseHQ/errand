@@ -13,18 +13,18 @@ class Status(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class Job:
+class Job[P = Any, R = Any]:
     """一条持久化的差事"""
 
     id: str
     kind: str
-    payload: Any
-    """提交时的 JSON 输入"""
+    payload: P
+    """提交时的输入"""
     status: Status = Status.RUNNING
-    result: Any = None
-    """办成后处理函数的 JSON 返回值"""
+    result: R | None = None
+    """办成后处理函数的返回值"""
     error: str | None = None
     """失败时的异常描述"""
 
 
-type Handler = Callable[[Job], Awaitable[Any]]
+type Handler[P, R] = Callable[[Job[P]], Awaitable[R]]

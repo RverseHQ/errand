@@ -1,4 +1,4 @@
 from errand.job import Handler, Job, Status
-from errand.queue import Queue
+from errand.queue import Errand, Queue
 
-__all__ = ["Handler", "Job", "Queue", "Status"]
+__all__ = ["Errand", "Handler", "Job", "Queue", "Status"]
