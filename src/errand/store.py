@@ -31,6 +31,9 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute(SCHEMA)
 
+    def close(self) -> None:
+        self.db.close()
+
     def insert(self, job: Job) -> None:
         self.db.execute(
             "INSERT INTO jobs (id, kind, payload, status) VALUES (?, ?, ?, ?)",

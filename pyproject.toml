@@ -22,6 +22,9 @@ dev = [
     "ty>=0.0.87",
 ]
 
+[tool.pytest.ini_options]
+filterwarnings = ["error"]
+
 [tool.ruff]
 line-length = 128
 target-version = "py313"
