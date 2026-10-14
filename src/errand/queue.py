@@ -1,52 +1,14 @@
 import asyncio
-import json
 import logging
-import sqlite3
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from enum import StrEnum
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Self
 from uuid import uuid4
 
+from errand.job import Handler, Job
+from errand.store import Store
+
 logger = logging.getLogger("errand")
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS jobs (
-    id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    status TEXT NOT NULL,
-    result TEXT,
-    error TEXT
-)
-"""
-
-
-class Status(StrEnum):
-    """差事状态"""
-
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
-
-
-@dataclass(frozen=True, slots=True)
-class Job:
-    """一条持久化的差事"""
-
-    id: str
-    kind: str
-    payload: Any
-    """提交时的 JSON 输入"""
-    status: Status = Status.RUNNING
-    result: Any = None
-    """办成后处理函数的 JSON 返回值"""
-    error: str | None = None
-    """失败时的异常描述"""
-
-
-type Handler = Callable[[Job], Awaitable[Any]]
 
 
 class Queue:
@@ -60,9 +22,7 @@ class Queue:
     """
 
     def __init__(self, path: str | Path) -> None:
-        self.db = sqlite3.connect(path, isolation_level=None)
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute(SCHEMA)
+        self.store = Store(path)
         self.handlers: dict[str, Handler] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.open = False
@@ -89,29 +49,21 @@ class Queue:
         if kind not in self.handlers:
             raise KeyError(f"未注册的差事类型: {kind}")
         job = Job(uuid4().hex, kind, payload)
-        self.db.execute(
-            "INSERT INTO jobs (id, kind, payload, status) VALUES (?, ?, ?, ?)",
-            (job.id, kind, dumps(payload), job.status),
-        )
+        self.store.insert(job)
         self.start(job)
         return job.id
 
     def get(self, id: str) -> Job | None:
         """查询一件差事的当前快照"""
 
-        row = self.db.execute("SELECT id, kind, payload, status, result, error FROM jobs WHERE id = ?", (id,)).fetchone()
-        if row is None:
-            return None
-        id, kind, payload, status, result, error = row
-        return Job(id, kind, json.loads(payload), Status(status), loads(result), error)
+        return self.store.get(id)
 
     async def __aenter__(self) -> Self:
         """启动队列并重跑上次未办完的差事"""
 
         self.open = True
-        rows = self.db.execute("SELECT id, kind, payload FROM jobs WHERE status = ?", (Status.RUNNING,)).fetchall()
-        for id, kind, payload in rows:
-            self.start(Job(id, kind, json.loads(payload)))
+        for job in self.store.running():
+            self.start(job)
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -135,20 +87,6 @@ class Queue:
             result = await self.handlers[job.kind](job)
         except Exception as error:
             logger.exception("差事失败: id=%s kind=%s", job.id, job.kind)
-            self.db.execute(
-                "UPDATE jobs SET status = ?, error = ? WHERE id = ?",
-                (Status.FAILED, f"{type(error).__name__}: {error}", job.id),
-            )
+            self.store.fail(job.id, f"{type(error).__name__}: {error}")
         else:
-            self.db.execute(
-                "UPDATE jobs SET status = ?, result = ? WHERE id = ?",
-                (Status.DONE, dumps(result), job.id),
-            )
-
-
-def dumps(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False)
-
-
-def loads(value: str | None) -> Any:
-    return None if value is None else json.loads(value)
+            self.store.finish(job.id, result)
