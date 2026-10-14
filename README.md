@@ -218,10 +218,6 @@ async def read(id: str) -> Job:
 
 Added when a real workload needs them, not before.
 
-Typing:
-
-- typed payloads and results for dataclass, msgspec, pydantic and `TypedDict`
-
 Execution:
 
 - retries with backoff
