@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -25,6 +26,10 @@ class Job:
     """办成后处理函数的 JSON 返回值"""
     error: str | None = None
     """失败时的异常描述"""
+    created_at: datetime | None = None
+    """受理时间, UTC, 加入时间戳之前的旧差事为空"""
+    finished_at: datetime | None = None
+    """进入终态的时间, UTC"""
 
 
 type Handler = Callable[[Job], Awaitable[Any]]

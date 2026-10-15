@@ -15,11 +15,27 @@ a real workload needs them, and the code is refactored then, not prepared in adv
 
 - Small core. No runtime dependencies.
 - One file, one process. All state lives in a single SQLite database.
-- At-least-once. Interrupted jobs rerun from the start on the next launch.
+- At-least-once. Interrupted jobs rerun from the start on the next launch. Side effects
+  a handler made before the interruption, such as a callback, happen again, so make
+  them idempotent downstream, for example by keying them on the job id.
 - Failure is a result. A raised exception ends the job as `failed`. Nothing retries.
 - JSON in, JSON out. Payloads and results are stored as JSON.
 - Event loop only. Call the queue from the thread that runs the loop.
 - Lifespan owns the connection. The database is open only inside `async with queue`.
+
+### Scope
+
+`errand` is a durable task queue and nothing else. Its primitives are the ones task
+queues broadly agree on: register a handler by name, enqueue durably, execute and
+record the outcome, redeliver what never finished, inspect jobs, and start and stop
+cleanly. It stays minimal and grows only with real need.
+
+- Whether something belongs in the core is decided by task queue design consensus,
+  not by what one service wants.
+- The core never changes for a single service. A service builds its requirement by
+  composing the primitives, as in [Composing primitives](#composing-primitives).
+- A pattern shared by most of the team, where moving it into the core gives large
+  leverage, is the one exception, and is discussed on its own when it appears.
 
 ## API
 
@@ -31,7 +47,7 @@ a real workload needs them, and the code is refactored then, not prepared in adv
 | `queue.get(id)` | Read a snapshot of a job, or `None`. |
 | `queue.running()` | List snapshots of unfinished jobs in submission order, including interrupted ones awaiting rerun. |
 | `async with queue` | Open the database and rerun interrupted jobs on enter. Cancel running jobs and close the database on exit. |
-| `Job` | `id`, `kind`, `payload`, `status`, `result`, `error`. |
+| `Job` | `id`, `kind`, `payload`, `status`, `result`, `error`, `created_at`, `finished_at`. Times are UTC. |
 | `Status` | `running`, `done`, `failed`. |
 
 ## Usage
@@ -139,6 +155,44 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+### Composing primitives
+
+Requirements of one service are built from the primitives. This reuses an unfinished
+job for an identical request instead of starting another. What counts as identical
+is the service's decision.
+
+```python
+import asyncio
+
+from errand import Job, Queue
+
+queue = Queue("errand.db")
+
+
+@queue.handler("summarize")
+async def summarize(job: Job) -> str:
+    await asyncio.sleep(1)
+    return job.payload["text"][:10]
+
+
+def submit_once(payload: dict) -> str:
+    for job in queue.running():
+        if job.kind == "summarize" and job.payload == payload:
+            return job.id
+    return queue.submit("summarize", payload)
+
+
+async def main() -> None:
+    async with queue:
+        first = submit_once({"text": "a long document"})
+        second = submit_once({"text": "a long document"})
+
+        assert first == second
+
+
+asyncio.run(main())
+```
+
 ### Recovery
 
 ```python
@@ -226,6 +280,7 @@ Execution:
 - retries with backoff
 - per-kind concurrency limits
 - timeouts
+- a file lock that enforces one process per database
 
 Submission:
 
@@ -235,5 +290,4 @@ Submission:
 
 Storage:
 
-- timestamps
 - retention of finished jobs
