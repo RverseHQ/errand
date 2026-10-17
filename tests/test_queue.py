@@ -212,3 +212,78 @@ def test_closes_database_on_exit_and_reopens_on_enter(tmp_path: Path) -> None:
             await settle(queue, queue.submit("echo", 2))
 
     asyncio.run(main())
+
+
+def test_limits_concurrency_per_kind_in_submission_order(tmp_path: Path) -> None:
+    queue = Queue(tmp_path / "q.db")
+    gate = asyncio.Event()
+    active: list[int] = []
+    order: list[int] = []
+    peak = 0
+
+    @queue.handler("limited", concurrency=2)
+    async def limited(job: Job) -> None:
+        nonlocal peak
+        active.append(job.payload)
+        order.append(job.payload)
+        peak = max(peak, len(active))
+        await gate.wait()
+        active.remove(job.payload)
+
+    @queue.handler("free")
+    async def free(job: Job) -> object:
+        return job.payload
+
+    async def main() -> None:
+        async with queue:
+            ids = [queue.submit("limited", n) for n in range(5)]
+            await asyncio.sleep(0.05)
+            assert order == [0, 1]
+            assert (await settle(queue, queue.submit("free", 1))).result == 1
+            gate.set()
+            for id in ids:
+                await settle(queue, id)
+        assert (peak, order) == (2, [0, 1, 2, 3, 4])
+
+    asyncio.run(main())
+
+
+def test_recovery_respects_concurrency(tmp_path: Path) -> None:
+    active = 0
+    peak = 0
+
+    def build(block: bool) -> Queue:
+        queue = Queue(tmp_path / "q.db")
+
+        @queue.handler("long", concurrency=1 if not block else None)
+        async def long(job: Job) -> None:
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(3600 if block else 0.01)
+            active -= 1
+
+        return queue
+
+    async def first() -> list[str]:
+        queue = build(block=True)
+        async with queue:
+            ids = [queue.submit("long", n) for n in range(3)]
+            await asyncio.sleep(0)
+        return ids
+
+    async def second(ids: list[str]) -> None:
+        nonlocal active, peak
+        active, peak = 0, 0
+        queue = build(block=False)
+        async with queue:
+            for id in ids:
+                await settle(queue, id)
+        assert peak == 1
+
+    asyncio.run(second(asyncio.run(first())))
+
+
+def test_rejects_concurrency_below_one(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        Queue(tmp_path / "q.db").handler("bad", concurrency=0)
