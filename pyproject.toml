@@ -1,6 +1,6 @@
 [project]
 name = "errand"
-version = "0.2.0"
+version = "0.3.0"
 description = "单进程内的持久化异步任务队列"
 readme = "README.md"
 license = "MIT"
