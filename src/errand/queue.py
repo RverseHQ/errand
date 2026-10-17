@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self
 from uuid import uuid4
@@ -50,7 +51,7 @@ class Queue:
             raise RuntimeError("队列未启动")
         if kind not in self.handlers:
             raise KeyError(f"未注册的差事类型: {kind}")
-        job = Job(uuid4().hex, kind, payload)
+        job = Job(uuid4().hex, kind, payload, created_at=datetime.now(UTC))
         self.connected().insert(job)
         self.start(job)
         return job.id

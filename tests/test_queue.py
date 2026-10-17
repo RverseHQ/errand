@@ -1,4 +1,7 @@
 import asyncio
+import sqlite3
+from contextlib import closing
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -61,6 +64,46 @@ def test_unencodable_result_fails_instead_of_hanging(tmp_path: Path) -> None:
             job = await settle(queue, queue.submit("odd", None))
             assert job.status is Status.FAILED
             assert job.error is not None and job.error.startswith("TypeError")
+
+    asyncio.run(main())
+
+
+def test_records_timestamps_in_utc(tmp_path: Path) -> None:
+    queue = Queue(tmp_path / "q.db")
+
+    @queue.handler("echo")
+    async def echo(job: Job) -> object:
+        assert job.created_at is not None and job.finished_at is None
+        return job.payload
+
+    async def main() -> None:
+        async with queue:
+            job = await settle(queue, queue.submit("echo", 1))
+            assert job.created_at is not None and job.finished_at is not None
+            assert job.created_at.tzinfo is UTC and job.created_at <= job.finished_at
+
+    asyncio.run(main())
+
+
+def test_upgrades_database_without_timestamps(tmp_path: Path) -> None:
+    path = tmp_path / "q.db"
+    with closing(sqlite3.connect(path)) as db:
+        db.execute(
+            "CREATE TABLE jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL,"
+            " status TEXT NOT NULL, result TEXT, error TEXT)"
+        )
+        db.execute("INSERT INTO jobs VALUES ('old', 'echo', '1', 'done', '1', NULL)")
+        db.commit()
+    queue = Queue(path)
+
+    @queue.handler("echo")
+    async def echo(job: Job) -> object:
+        return job.payload
+
+    async def main() -> None:
+        async with queue:
+            assert queue.get("old") == Job("old", "echo", 1, Status.DONE, 1)
+            assert (await settle(queue, queue.submit("echo", 2))).created_at is not None
 
     asyncio.run(main())
 
