@@ -30,19 +30,27 @@ queues broadly agree on: register a handler by name, enqueue durably, execute an
 record the outcome, redeliver what never finished, inspect jobs, and start and stop
 cleanly. It stays minimal and grows only with real need.
 
-- Whether something belongs in the core is decided by task queue design consensus,
-  not by what one service wants.
-- The core never changes for a single service. A service builds its requirement by
-  composing the primitives, as in [Composing primitives](#composing-primitives).
-- A pattern shared by most of the team, where moving it into the core gives large
-  leverage, is the one exception, and is discussed on its own when it appears.
+Every addition starts from a real need of a service, and the core takes the smallest
+shape that meets it. A need is judged in this order:
+
+1. If it is task queue design consensus, it goes into the core.
+2. Otherwise, if the existing API or primitives can express it, the service composes
+   it, as in [Composing primitives](#composing-primitives).
+3. Otherwise, if only one service needs it, it stays in that service.
+4. Otherwise, when several services share it, its leverage is weighed case by case,
+   and it may go into the core.
+
+Being composable is not a reason to reject a consensus primitive. Per-kind
+concurrency limits can be written as a semaphore in each handler, but every task
+queue offers them, and recovery is what releases a backlog all at once, so the queue
+bounds it.
 
 ## API
 
 | API | Purpose |
 | --- | --- |
 | `Queue(path)` | Create a queue backed by a SQLite file, opened on enter. |
-| `@queue.handler(kind)` | Register an async handler for a kind of job. |
+| `@queue.handler(kind, concurrency=None)` | Register an async handler for a kind of job. With a limit, at most that many jobs of the kind run at once and the rest wait in submission order. |
 | `queue.submit(kind, payload)` | Persist a job, start it, and return its id. |
 | `queue.get(id)` | Read a snapshot of a job, or `None`. |
 | `queue.running()` | List snapshots of unfinished jobs in submission order, including interrupted ones awaiting rerun. |
@@ -278,7 +286,6 @@ Added when a real workload needs them, not before.
 Execution:
 
 - retries with backoff
-- per-kind concurrency limits
 - timeouts
 - a file lock that enforces one process per database
 

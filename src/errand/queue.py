@@ -27,14 +27,28 @@ class Queue:
         self.path = path
         self.store: Store | None = None
         self.handlers: dict[str, Handler] = {}
+        self.concurrency: dict[str, int] = {}
+        self.slots: dict[str, asyncio.Semaphore] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.open = False
 
-    def handler(self, kind: str) -> Callable[[Handler], Handler]:
-        """注册一种差事的处理函数, 抛出异常即失败, 返回值按 JSON 保存为结果"""
+    def handler(self, kind: str, concurrency: int | None = None) -> Callable[[Handler], Handler]:
+        """注册一种差事的处理函数, 抛出异常即失败, 返回值按 JSON 保存为结果
+
+        参数
+        - kind: 差事类型
+        - concurrency: 同类型最多同时办理的件数, 超出的保持 running 按提交顺序等待, 为空时不限制
+        """
+
+        if concurrency is not None and concurrency < 1:
+            raise ValueError(f"并发上限至少为 1: {concurrency}")
 
         def register(handler: Handler) -> Handler:
             self.handlers[kind] = handler
+            if concurrency is None:
+                self.concurrency.pop(kind, None)
+            else:
+                self.concurrency[kind] = concurrency
             return handler
 
         return register
@@ -75,6 +89,7 @@ class Queue:
         if self.store is not None:
             raise RuntimeError("队列已启动")
         self.store = Store(self.path)
+        self.slots = {kind: asyncio.Semaphore(limit) for kind, limit in self.concurrency.items()}
         self.open = True
         for job in self.store.running():
             self.start(job)
@@ -108,8 +123,14 @@ class Queue:
     async def run(self, job: Job) -> None:
         """办理一件差事并落下结果"""
 
+        slot = self.slots.get(job.kind)
         try:
-            self.connected().finish(job.id, await self.handlers[job.kind](job))
+            if slot is None:
+                result = await self.handlers[job.kind](job)
+            else:
+                async with slot:
+                    result = await self.handlers[job.kind](job)
+            self.connected().finish(job.id, result)
         except Exception as error:
             logger.exception("差事失败: id=%s kind=%s", job.id, job.kind)
             self.connected().fail(job.id, f"{type(error).__name__}: {error}")
