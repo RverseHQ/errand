@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>errand - Minimal durable task queue for Python</title>
+    <meta
+      name="description"
+      content="A durable in-process task queue for Python. Jobs are written to SQLite before they start and rerun from the beginning if the process stops first."
+    >
+    <meta property="og:title" content="errand - Minimal durable task queue for Python">
+    <meta
+      property="og:description"
+      content="Persist, run, recover. One SQLite file, one process, no broker. No runtime dependencies."
+    >
+    <meta property="og:type" content="website">
+    <style>
+      :root {
+        --font-mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        --spacing: 0.25rem;
+        --color-bg: #2a2bd5;
+        --color-bg-deep: #2020b8;
+        --color-fg: #ffffff;
+        --color-fg-muted: #c0c0ec;
+        --color-fg-subtle: #8b8bcb;
+        --color-line: #5151e3;
+        --color-line-soft: #3a3adc;
+        --color-mark: #ffe066;
+      }
+
+      * {
+        box-sizing: border-box;
+        border-color: var(--color-line);
+        border-radius: 0 !important;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--color-bg);
+        color: var(--color-fg);
+        font-family: var(--font-mono);
+        font-size: 13px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: geometricprecision;
+      }
+
+      ::selection {
+        background: var(--color-mark);
+        color: var(--color-bg);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: underline;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      a:hover {
+        background: var(--color-mark);
+        color: var(--color-bg);
+      }
+
+      button {
+        color: inherit;
+        font: inherit;
+        text-transform: inherit;
+      }
+
+      p,
+      h1,
+      h2,
+      ul,
+      ol,
+      pre {
+        margin: 0;
+      }
+
+      ul {
+        padding: 0;
+        list-style: none;
+      }
+
+      code,
+      pre {
+        font-family: var(--font-mono);
+        font-size: 1em;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 2rem;
+        padding: 1.5rem 1.5rem 2.5rem;
+        font-size: 12px;
+        line-height: 1.25;
+        letter-spacing: 0.025em;
+        text-transform: uppercase;
+      }
+
+      header a {
+        text-decoration: none;
+      }
+
+      .brand {
+        font-weight: 700;
+      }
+
+      .nav {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+      }
+
+      .language {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        white-space: nowrap;
+      }
+
+      .language button {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--color-fg);
+        cursor: pointer;
+        letter-spacing: inherit;
+      }
+
+      .language button:hover,
+      .language button:focus {
+        outline: none;
+        background: var(--color-mark);
+        color: var(--color-bg);
+      }
+
+      .language-options {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        min-width: max-content;
+        padding-top: 0.25rem;
+        background: var(--color-bg);
+      }
+
+      .language-options[hidden] {
+        display: none;
+      }
+
+      section {
+        max-width: 860px;
+        margin-inline: auto;
+        padding: 3rem 1.5rem;
+        border-top: 1px solid var(--color-line);
+        scroll-margin-top: 2rem;
+      }
+
+      footer {
+        max-width: 1100px;
+        margin-inline: auto;
+        padding: 2.5rem 1.5rem;
+        border-top: 1px solid var(--color-line);
+        font-size: 11px;
+        letter-spacing: 0.025em;
+        text-transform: uppercase;
+      }
+
+      .h-doc {
+        margin-bottom: 1.5rem;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.4;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .h-doc-1 {
+        margin-bottom: 2rem;
+      }
+
+      .h-doc-1::before {
+        content: "# ";
+        color: var(--color-fg-muted);
+      }
+
+      .h-doc-2::before {
+        content: "## ~ ";
+        color: var(--color-fg-muted);
+      }
+
+      .copy {
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .copy > * + * {
+        margin-top: 1.25rem;
+      }
+
+      #guarantees ul li::before {
+        content: "- ";
+        color: var(--color-fg-subtle);
+      }
+
+      .copy ol {
+        padding-left: 1.5rem;
+      }
+
+      .code-wrap {
+        margin-block: 1.5rem;
+      }
+
+      .code-block {
+        overflow-x: auto;
+        padding: 12px 16px;
+        border: 1px solid var(--color-line);
+        background: var(--color-bg-deep);
+        color: var(--color-fg);
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre;
+      }
+
+      .callout {
+        padding: 6px 16px;
+        border: 1px solid var(--color-line);
+        border-top: 0;
+        background: var(--color-bg-deep);
+        color: var(--color-fg-muted);
+        font-size: 11px;
+      }
+
+      .ic {
+        padding: 0 4px;
+        background: var(--color-line-soft);
+        color: var(--color-fg);
+      }
+
+      .muted {
+        color: var(--color-fg-muted);
+      }
+
+      .subtle {
+        color: var(--color-fg-subtle);
+      }
+
+      .api-table {
+        width: 100%;
+        margin-top: 1.5rem;
+        border-collapse: collapse;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .api-table th,
+      .api-table td {
+        padding: 8px 12px;
+        border: 1px solid var(--color-line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .api-table th {
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .footer-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1rem;
+        margin-top: 1rem;
+      }
+
+      .footer-nav span + span::before {
+        margin-right: 1rem;
+        color: var(--color-fg-subtle);
+        content: "|";
+      }
+
+      .footer-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        margin-top: 1.5rem;
+        color: var(--color-fg-muted);
+      }
+
+      @media (min-width: 40rem) {
+        header {
+          padding-inline: 2.5rem;
+        }
+
+        section {
+          padding-inline: 2.5rem;
+        }
+
+        footer {
+          padding-inline: 2.5rem;
+        }
+
+        .footer-meta {
+          flex-direction: row;
+          justify-content: space-between;
+        }
+      }
+
+      /* {{iso-css}} */
+
+      .iso {
+        --anatomy-card: var(--color-bg-deep);
+        --anatomy-paper: var(--color-bg-deep);
+        --anatomy-text: var(--color-fg-muted);
+        --anatomy-strong: var(--color-fg);
+        --anatomy-muted: var(--color-fg-subtle);
+        --anatomy-face: #2525c2;
+        --anatomy-top: #2828c9;
+        --anatomy-shade-0: #1717a0;
+        --anatomy-shade-1: #1a1aa9;
+        --anatomy-shade-2: #1d1db2;
+        --anatomy-shade-3: #2121bc;
+        --anatomy-lit-top: #4a49c6;
+        --anatomy-lit-shade: #3a39b4;
+        --anatomy-hi: #f2f2ff;
+        --anatomy-mid: #9898e4;
+        --anatomy-lo: #6262e6;
+        --anatomy-faint: #3e3ed2;
+        --anatomy-lit: var(--color-mark);
+        --anatomy-halo: #0a0a5a;
+        --anatomy-halo-opacity: 0.75;
+        --anatomy-dot: #ffffff;
+        --anatomy-mono: var(--font-mono);
+      }
+
+      .iso-figure {
+        margin: 1.5rem 0 0;
+      }
+
+      .iso-plate {
+        box-shadow: 0 0 0 1px var(--color-line);
+        padding: 52px 20px;
+      }
+
+      .iso-plate-corner {
+        font-size: 10.5px;
+      }
+
+      .iso-legend {
+        margin-top: 0;
+        padding: 10px 16px 12px;
+        border: 1px solid var(--color-line);
+        border-top: 0;
+        background: var(--color-bg-deep);
+        color: var(--color-fg-muted);
+        font-size: 11px;
+        line-height: 1.6;
+      }
+
+      .iso-caption {
+        display: block;
+      }
+
+      .iso-stage {
+        position: relative;
+        touch-action: pan-y;
+      }
+
+      .iso-stage:focus {
+        outline: none;
+      }
+
+      .iso-stage:focus-visible {
+        outline: 1px solid var(--color-mark);
+        outline-offset: 6px;
+      }
+
+      .ed-dark {
+        fill: var(--anatomy-shade-0);
+      }
+
+      .ed-well {
+        fill: var(--anatomy-shade-1);
+      }
+
+      .ed-wire .iso-line {
+        stroke-width: 1px;
+      }
+
+      [data-hit="a"],
+      [data-hit="b"],
+      [data-hit="power"] {
+        cursor: pointer;
+      }
+
+      .ed-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      @media (max-width: 560px) {
+        .iso-plate {
+          overflow: hidden;
+          padding: 48px 8px 64px;
+        }
+
+        .iso-stage svg {
+          width: 106%;
+          margin: 12px 0 8px -3%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <a class="brand" href="#">ERRAND</a>
+        </div>
+        <nav class="nav" aria-label="Primary">
+          <a href="#desk" data-i18n="nav.desk">[ DESK ]</a>
+          <a href="#api" data-i18n="nav.api">[ API ]</a>
+          <a href="#usage" data-i18n="nav.usage">[ USAGE ]</a>
+          <a href="https://github.com/RverseHQ/errand" data-i18n="nav.github">[ GITHUB ]</a>
+          <div class="language">
+            <button
+              id="language-button"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >[ ENGLISH ]</button>
+            <div class="language-options" id="language-options" hidden>
+              <button type="button" data-language-option="en">[ ENGLISH ]</button>
+              <button type="button" data-language-option="zh">[ 中文 ]</button>
+              <button type="button" data-language-option="ja">[ 日本語 ]</button>
+              <button type="button" data-language-option="ru">[ РУССКИЙ ]</button>
+              <button type="button" data-language-option="fr">[ FRANÇAIS ]</button>
+              <button type="button" data-language-option="de">[ DEUTSCH ]</button>
+              <button type="button" data-language-option="ko">[ 한국어 ]</button>
+            </div>
+          </div>
+        </nav>
+      </header>
+
+      <section>
+        <h1 class="h-doc h-doc-1" data-i18n="hero.title">MINIMAL DURABLE TASK QUEUE FOR PYTHON</h1>
+        <div class="copy">
+          <p data-i18n-html="hero.copy1"></p>
+          <p data-i18n="hero.copy2"></p>
+        </div>
+        <div class="code-wrap">
+          <pre class="code-block"><code>&gt; uv add git+https://github.com/RverseHQ/errand</code></pre>
+          <div class="callout" data-i18n="hero.callout"></div>
+        </div>
+      </section>
+
+      <section id="desk">
+        <h2 class="h-doc h-doc-2" data-i18n="desk.title">THE DISPATCH DESK</h2>
+        <div class="copy">
+          <p data-i18n-html="desk.copy1"></p>
+          <p data-i18n-html="desk.copy2"></p>
+        </div>
+        <!-- {{figure}} -->
+        <div class="code-wrap">
+          <pre class="code-block"><code>from errand import Job, Queue
+
+queue = Queue("errand.db")
+
+
+@queue.handler("summarize", concurrency=2)
+async def summarize(job: Job) -&gt; str:
+    return await llm(job.payload["text"])
+
+
+@queue.handler("greet")
+async def greet(job: Job) -&gt; str:
+    return f"hello {job.payload['name']}"</code></pre>
+          <div class="callout" data-i18n="desk.callout"></div>
+        </div>
+      </section>
+
+      <section id="guarantees">
+        <h2 class="h-doc h-doc-2" data-i18n="guarantees.title">A SHORT LIST OF GUARANTEES</h2>
+        <div class="copy">
+          <p data-i18n="guarantees.copy1"></p>
+          <ul>
+            <li data-i18n-html="guarantees.item1"></li>
+            <li data-i18n-html="guarantees.item2"></li>
+            <li data-i18n-html="guarantees.item3"></li>
+            <li data-i18n-html="guarantees.item4"></li>
+            <li data-i18n-html="guarantees.item5"></li>
+            <li data-i18n-html="guarantees.item6"></li>
+            <li data-i18n-html="guarantees.item7"></li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="usage">
+        <h2 class="h-doc h-doc-2" data-i18n="usage.title">SUBMIT AND READ BACK</h2>
+        <div class="copy">
+          <p data-i18n-html="usage.copy1"></p>
+        </div>
+        <div class="code-wrap">
+          <pre class="code-block"><code>import asyncio
+
+from errand import Job, Queue, Status
+
+queue = Queue("errand.db")
+
+
+@queue.handler("greet")
+async def greet(job: Job) -&gt; str:
+    return f"hello {job.payload['name']}"
+
+
+async def main() -&gt; None:
+    async with queue:
+        id = queue.submit("greet", {"name": "errand"})
+        await asyncio.sleep(0)
+
+        job = queue.get(id)
+
+        assert job.status is Status.DONE
+        assert job.result == "hello errand"
+
+
+asyncio.run(main())</code></pre>
+        </div>
+      </section>
+
+      <section id="failures">
+        <h2 class="h-doc h-doc-2" data-i18n="failures.title">FAILURE IS A RESULT</h2>
+        <div class="copy">
+          <p data-i18n-html="failures.copy1"></p>
+        </div>
+        <div class="code-wrap">
+          <pre class="code-block"><code>@queue.handler("divide")
+async def divide(job: Job) -&gt; float:
+    return job.payload["a"] / job.payload["b"]
+
+
+async with queue:
+    id = queue.submit("divide", {"a": 1, "b": 0})
+    await asyncio.sleep(0)
+
+    job = queue.get(id)
+
+    assert job.status is Status.FAILED
+    assert job.error == "ZeroDivisionError: division by zero"</code></pre>
+          <div class="callout" data-i18n="failures.callout"></div>
+        </div>
+      </section>
+
+      <section id="recovery">
+        <h2 class="h-doc h-doc-2" data-i18n="recovery.title">RECOVERY</h2>
+        <div class="copy">
+          <p data-i18n-html="recovery.copy1"></p>
+          <p data-i18n-html="recovery.copy2"></p>
+        </div>
+        <div class="code-wrap">
+          <pre class="code-block"><code>async def crash() -&gt; str:
+    queue = Queue("errand.db")
+
+    @queue.handler("work")
+    async def work(job: Job) -&gt; None:
+        await asyncio.sleep(3600)
+
+    async with queue:
+        id = queue.submit("work", None)
+        await asyncio.sleep(0)
+
+        assert queue.get(id).status is Status.RUNNING
+
+    return id
+
+
+async def restart(id: str) -&gt; None:
+    queue = Queue("errand.db")
+
+    @queue.handler("work")
+    async def work(job: Job) -&gt; str:
+        return "finished"
+
+    async with queue:
+        await asyncio.sleep(0)
+
+        assert queue.get(id).result == "finished"
+
+
+asyncio.run(restart(asyncio.run(crash())))</code></pre>
+          <div class="callout" data-i18n="recovery.callout"></div>
+        </div>
+      </section>
+
+      <section id="compose">
+        <h2 class="h-doc h-doc-2" data-i18n="compose.title">COMPOSING PRIMITIVES</h2>
+        <div class="copy">
+          <p data-i18n-html="compose.copy1"></p>
+        </div>
+        <div class="code-wrap">
+          <pre class="code-block"><code>def submit_once(payload: dict) -&gt; str:
+    for job in queue.running():
+        if job.kind == "summarize" and job.payload == payload:
+            return job.id
+    return queue.submit("summarize", payload)</code></pre>
+          <div class="callout" data-i18n="compose.callout"></div>
+        </div>
+      </section>
+
+      <section id="api">
+        <h2 class="h-doc h-doc-2" data-i18n="api.title">ONE SMALL SURFACE</h2>
+        <div class="copy">
+          <p data-i18n="api.copy1"></p>
+        </div>
+        <table class="api-table">
+          <thead>
+            <tr>
+              <th data-i18n="api.table.api">API</th>
+              <th data-i18n="api.table.purpose">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="ic">Queue(path)</span></td>
+              <td data-i18n="api.table.queue"></td>
+            </tr>
+            <tr>
+              <td><span class="ic">@queue.handler(kind, concurrency=None)</span></td>
+              <td data-i18n="api.table.handler"></td>
+            </tr>
+            <tr>
+              <td><span class="ic">queue.submit(kind, payload)</span></td>
+              <td data-i18n="api.table.submit"></td>
+            </tr>
+            <tr>
+              <td><span class="ic">queue.get(id)</span></td>
+              <td data-i18n="api.table.get"></td>
+            </tr>
+            <tr>
+              <td><span class="ic">queue.running()</span></td>
+              <td data-i18n="api.table.running"></td>
+            </tr>
+            <tr>
+              <td><span class="ic">async with queue</span></td>
+              <td data-i18n="api.table.lifespan"></td>
+            </tr>
+            <tr>
+              <td><span class="ic">Job</span></td>
+              <td data-i18n="api.table.job"></td>
+            </tr>
+            <tr>
+              <td><span class="ic">Status</span></td>
+              <td data-i18n="api.table.status"></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="web">
+        <h2 class="h-doc h-doc-2" data-i18n="web.title">WEB SERVICES</h2>
+        <div class="copy">
+          <p data-i18n-html="web.copy1"></p>
+        </div>
+        <div class="code-wrap">
+          <pre class="code-block"><code>@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with queue:
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.post("/tasks")
+async def create(text: str) -&gt; str:
+    return queue.submit("summarize", {"text": text})
+
+
+@app.get("/tasks/{id}")
+async def read(id: str) -&gt; Job:
+    job = queue.get(id)
+    if job is None:
+        raise HTTPException(404)
+    return job</code></pre>
+        </div>
+      </section>
+
+      <section id="roadmap">
+        <h2 class="h-doc h-doc-2" data-i18n="roadmap.title">ROADMAP</h2>
+        <div class="copy">
+          <p data-i18n="roadmap.copy1"></p>
+          <ul>
+            <li data-i18n-html="roadmap.item1"></li>
+            <li data-i18n-html="roadmap.item2"></li>
+            <li data-i18n-html="roadmap.item3"></li>
+          </ul>
+        </div>
+      </section>
+
+      <footer>
+        <div class="muted">---</div>
+        <nav class="footer-nav" aria-label="Footer">
+          <span><a href="#desk" data-i18n="footer.desk">DESK</a></span>
+          <span><a href="#api" data-i18n="footer.api">API</a></span>
+          <span><a href="https://github.com/RverseHQ/errand" data-i18n="footer.github">GITHUB</a></span>
+          <span><a href="https://github.com/RverseHQ/errand/issues" data-i18n="footer.issues">ISSUES</a></span>
+        </nav>
+        <div class="footer-meta">
+          <span data-i18n="footer.license"></span>
+          <span data-i18n-html="footer.by"></span>
+          <span data-i18n="footer.tagline"></span>
+        </div>
+      </footer>
+    </main>
+    <script>
+/* {{i18n}} */
+    </script>
+    <script type="module">
+/* {{figure-script}} */
+    </script>
+  </body>
+</html>
