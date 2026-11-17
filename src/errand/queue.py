@@ -12,6 +12,12 @@ from errand.store import Store
 logger = logging.getLogger("errand")
 
 
+def backoff(failures: int) -> float:
+    """累计失败 n 次后重试前等待的秒数, 从 1 秒起逐次翻倍, 最长 1 小时"""
+
+    return min(2 ** (failures - 1), 3600)
+
+
 class Queue:
     """单进程内的持久化异步任务队列
 
@@ -28,23 +34,30 @@ class Queue:
         self.store: Store | None = None
         self.handlers: dict[str, Handler] = {}
         self.concurrency: dict[str, int] = {}
+        self.attempts: dict[str, int] = {}
         self.slots: dict[str, asyncio.Semaphore] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.open = False
 
-    def handler(self, kind: str, concurrency: int | None = None) -> Callable[[Handler], Handler]:
+    def handler(self, kind: str, concurrency: int | None = None, attempts: int = 1) -> Callable[[Handler], Handler]:
         """注册一种差事的处理函数, 抛出异常即失败, 返回值按 JSON 保存为结果
 
         参数
         - kind: 差事类型
         - concurrency: 同类型最多同时办理的件数, 超出的保持 running 按提交顺序等待, 为空时不限制
+        - attempts: 总尝试次数, 含第一次, 还有剩余时失败后保持 running, 退避后从头重跑,
+          重启后的重跑不计入次数
         """
 
         if concurrency is not None and concurrency < 1:
             raise ValueError(f"并发上限至少为 1: {concurrency}")
 
+        if attempts < 1:
+            raise ValueError(f"尝试次数至少为 1: {attempts}")
+
         def register(handler: Handler) -> Handler:
             self.handlers[kind] = handler
+            self.attempts[kind] = attempts
             if concurrency is None:
                 self.concurrency.pop(kind, None)
             else:
@@ -121,16 +134,24 @@ class Queue:
         task.add_done_callback(self.tasks.discard)
 
     async def run(self, job: Job) -> None:
-        """办理一件差事并落下结果"""
+        """办理一件差事并落下结果, 失败且还有剩余次数时退避重试, 退避期间不占并发名额"""
 
+        handler = self.handlers[job.kind]
         slot = self.slots.get(job.kind)
-        try:
-            if slot is None:
-                result = await self.handlers[job.kind](job)
-            else:
-                async with slot:
-                    result = await self.handlers[job.kind](job)
-            self.connected().finish(job.id, result)
-        except Exception as error:
-            logger.exception("差事失败: id=%s kind=%s", job.id, job.kind)
-            self.connected().fail(job.id, f"{type(error).__name__}: {error}")
+        while True:
+            try:
+                if slot is None:
+                    result = await handler(job)
+                else:
+                    async with slot:
+                        result = await handler(job)
+                self.connected().finish(job.id, result)
+                return
+            except Exception as error:
+                failures = self.connected().count_failure(job.id)
+                if failures >= self.attempts[job.kind]:
+                    logger.exception("差事失败: id=%s kind=%s failures=%d", job.id, job.kind, failures)
+                    self.connected().fail(job.id, f"{type(error).__name__}: {error}")
+                    return
+                logger.warning("差事失败, 稍后重试: id=%s kind=%s failures=%d", job.id, job.kind, failures, exc_info=True)
+            await asyncio.sleep(backoff(failures))

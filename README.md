@@ -18,7 +18,10 @@ a real workload needs them, and the code is refactored then, not prepared in adv
 - At-least-once. Interrupted jobs rerun from the start on the next launch. Side effects
   a handler made before the interruption, such as a callback, happen again, so make
   them idempotent downstream, for example by keying them on the job id.
-- Failure is a result. A raised exception ends the job as `failed`. Nothing retries.
+- Failure is a result. A raised exception ends the job as `failed` once the attempts its
+  handler allows run out, one by default. A retry reruns the job from the start after
+  waiting 1s, 2s, 4s and so on, at most an hour. The count of failed attempts survives
+  restarts, and a rerun after an interruption does not use one up.
 - JSON in, JSON out. Payloads and results are stored as JSON.
 - Event loop only. Call the queue from the thread that runs the loop.
 - Lifespan owns the connection. The database is open only inside `async with queue`.
@@ -50,7 +53,7 @@ bounds it.
 | API | Purpose |
 | --- | --- |
 | `Queue(path)` | Create a queue backed by a SQLite file, opened on enter. |
-| `@queue.handler(kind, concurrency=None)` | Register an async handler for a kind of job. With a limit, at most that many jobs of the kind run at once and the rest wait in submission order. |
+| `@queue.handler(kind, concurrency=None, attempts=1)` | Register an async handler for a kind of job. With a limit, at most that many jobs of the kind run at once and the rest wait in submission order. With more than one attempt, a failed job stays `running`, backs off without holding its slot, and runs again until it succeeds or the attempts run out. |
 | `queue.submit(kind, payload)` | Persist a job, start it, and return its id. |
 | `queue.get(id)` | Read a snapshot of a job, or `None`. |
 | `queue.running()` | List snapshots of unfinished jobs in submission order, including interrupted ones awaiting rerun. |
@@ -126,6 +129,44 @@ async def main() -> None:
 
         assert job.status is Status.FAILED
         assert job.error == "ZeroDivisionError: division by zero"
+
+
+asyncio.run(main())
+```
+
+### Retries
+
+A retry reruns the whole job, so give a side effect that needs retrying, such as a
+callback, its own kind, and submit it from the handler that produced the result. A
+failed callback then does not redo the work before it, and one that never got through
+stays in the database as a `failed` job.
+
+```python
+import asyncio
+
+from errand import Job, Queue, Status
+
+queue = Queue("errand.db")
+calls = 0
+
+
+@queue.handler("notify", attempts=3)
+async def notify(job: Job) -> None:
+    global calls
+    calls += 1
+    if calls == 1:
+        raise ConnectionError("peer is restarting")
+
+
+async def main() -> None:
+    async with queue:
+        id = queue.submit("notify", {"answer": 42})
+        await asyncio.sleep(1.1)
+
+        job = queue.get(id)
+
+        assert job.status is Status.DONE
+        assert calls == 2
 
 
 asyncio.run(main())
@@ -285,7 +326,6 @@ Added when a real workload needs them, not before.
 
 Execution:
 
-- retries with backoff
 - timeouts
 - a file lock that enforces one process per database
 

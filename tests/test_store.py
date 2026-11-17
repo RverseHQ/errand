@@ -34,3 +34,12 @@ def test_persists_across_connections(tmp_path: Path) -> None:
 
     with closing(Store(tmp_path / "q.db")) as store:
         assert store.get("a") == Job("a", "echo", 1)
+
+
+def test_counts_failures_across_connections(tmp_path: Path) -> None:
+    with closing(Store(tmp_path / "q.db")) as store:
+        store.insert(Job("a", "echo", 1))
+        assert store.count_failure("a") == 1
+
+    with closing(Store(tmp_path / "q.db")) as store:
+        assert store.count_failure("a") == 2
