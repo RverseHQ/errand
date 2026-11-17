@@ -15,12 +15,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     result TEXT,
     error TEXT,
     created_at TEXT,
-    finished_at TEXT
+    finished_at TEXT,
+    failures INTEGER NOT NULL DEFAULT 0
 )
 """
 
-ADDED = ("created_at", "finished_at")
-"""早期版本的表缺少的列, 打开时补上"""
+ADDED = {"created_at": "TEXT", "finished_at": "TEXT", "failures": "INTEGER NOT NULL DEFAULT 0"}
+"""早期版本的表缺少的列及其定义, 打开时补上"""
 
 COLUMNS = "id, kind, payload, status, result, error, created_at, finished_at"
 
@@ -37,9 +38,9 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute(SCHEMA)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(jobs)")}
-        for column in ADDED:
+        for column, definition in ADDED.items():
             if column not in columns:
-                self.db.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+                self.db.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
 
     def close(self) -> None:
         self.db.close()
@@ -71,6 +72,14 @@ class Store:
             "UPDATE jobs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
             (Status.FAILED, error, stamp(datetime.now(UTC)), id),
         )
+
+    def count_failure(self, id: str) -> int:
+        """记下一次失败的尝试, 返回累计失败次数"""
+
+        (failures,) = self.db.execute(
+            "UPDATE jobs SET failures = failures + 1 WHERE id = ? RETURNING failures", (id,)
+        ).fetchone()
+        return failures
 
 
 def restore(row: tuple[Any, ...]) -> Job:
