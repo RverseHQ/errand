@@ -287,3 +287,136 @@ def test_recovery_respects_concurrency(tmp_path: Path) -> None:
 def test_rejects_concurrency_below_one(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         Queue(tmp_path / "q.db").handler("bad", concurrency=0)
+
+
+def test_retries_until_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("errand.queue.backoff", lambda failures: 0)
+    queue = Queue(tmp_path / "q.db")
+    calls = 0
+
+    @queue.handler("flaky", attempts=3)
+    async def flaky(job: Job) -> int:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise RuntimeError(calls)
+        return calls
+
+    async def main() -> None:
+        async with queue:
+            job = await settle(queue, queue.submit("flaky", None))
+            assert (job.status, job.result, job.error) == (Status.DONE, 3, None)
+
+    asyncio.run(main())
+
+
+def test_fails_with_last_error_when_attempts_run_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("errand.queue.backoff", lambda failures: 0)
+    queue = Queue(tmp_path / "q.db")
+    calls = 0
+
+    @queue.handler("boom", attempts=3)
+    async def boom(job: Job) -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError(calls)
+
+    async def main() -> None:
+        async with queue:
+            job = await settle(queue, queue.submit("boom", None))
+            assert (job.status, job.error) == (Status.FAILED, "RuntimeError: 3")
+        assert calls == 3
+
+    asyncio.run(main())
+
+
+def test_backoff_releases_concurrency_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("errand.queue.backoff", lambda failures: 3600)
+    queue = Queue(tmp_path / "q.db")
+
+    @queue.handler("call", concurrency=1, attempts=2)
+    async def call(job: Job) -> object:
+        if job.payload == "down":
+            raise RuntimeError("down")
+        return job.payload
+
+    async def main() -> None:
+        async with queue:
+            down = queue.submit("call", "down")
+            assert (await settle(queue, queue.submit("call", "up"))).result == "up"
+            job = queue.get(down)
+            assert job is not None and job.status is Status.RUNNING
+
+    asyncio.run(main())
+
+
+def test_attempts_survive_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("errand.queue.backoff", lambda failures: 0 if failures < 2 else 3600)
+    calls = 0
+
+    def build() -> Queue:
+        queue = Queue(tmp_path / "q.db")
+
+        @queue.handler("boom", attempts=3)
+        async def boom(job: Job) -> None:
+            nonlocal calls
+            calls += 1
+            raise RuntimeError(calls)
+
+        return queue
+
+    async def first() -> str:
+        queue = build()
+        async with queue:
+            id = queue.submit("boom", None)
+            while calls < 2:
+                await asyncio.sleep(0.01)
+        return id
+
+    async def second(id: str) -> None:
+        queue = build()
+        async with queue:
+            assert (await settle(queue, id)).error == "RuntimeError: 3"
+
+    asyncio.run(second(asyncio.run(first())))
+    assert calls == 3
+
+
+def test_interrupted_run_does_not_use_up_attempts(tmp_path: Path) -> None:
+    started = asyncio.Event()
+
+    def build(block: bool) -> Queue:
+        queue = Queue(tmp_path / "q.db")
+
+        @queue.handler("long")
+        async def long(job: Job) -> str:
+            started.set()
+            if block:
+                await asyncio.sleep(3600)
+            return "ok"
+
+        return queue
+
+    async def first() -> str:
+        queue = build(block=True)
+        async with queue:
+            id = queue.submit("long", None)
+            await started.wait()
+        return id
+
+    async def second(id: str) -> None:
+        async with build(block=False) as queue:
+            assert (await settle(queue, id)).result == "ok"
+
+    asyncio.run(second(asyncio.run(first())))
+
+
+def test_backoff_doubles_up_to_an_hour() -> None:
+    from errand.queue import backoff
+
+    assert [backoff(n) for n in (1, 2, 3, 12, 13, 100)] == [1, 2, 4, 2048, 3600, 3600]
+
+
+def test_rejects_attempts_below_one(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        Queue(tmp_path / "q.db").handler("bad", attempts=0)
