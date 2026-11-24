@@ -1,6 +1,10 @@
-# errand
+<p align="center">
+  <img src="assets/icon.svg" alt="errand" width="128" height="128">
+</p>
 
-Minimal durable task queue for Python.
+<h1 align="center">errand</h1>
+
+<p align="center">Minimal durable task queue for Python.</p>
 
 ## Design
 
