@@ -31,13 +31,13 @@ class Queue:
 
     def __init__(self, path: str | Path) -> None:
         self.path = path
-        self.store: Store | None = None
-        self.handlers: dict[str, Handler] = {}
-        self.concurrency: dict[str, int] = {}
-        self.attempts: dict[str, int] = {}
-        self.slots: dict[str, asyncio.Semaphore] = {}
-        self.tasks: set[asyncio.Task[None]] = set()
-        self.open = False
+        self._store: Store | None = None
+        self._handlers: dict[str, Handler] = {}
+        self._concurrency: dict[str, int] = {}
+        self._attempts: dict[str, int] = {}
+        self._slots: dict[str, asyncio.Semaphore] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
+        self._open = False
 
     def handler(self, kind: str, concurrency: int | None = None, attempts: int = 1) -> Callable[[Handler], Handler]:
         """注册一种差事的处理函数, 抛出异常即失败, 返回值按 JSON 保存为结果
@@ -56,12 +56,12 @@ class Queue:
             raise ValueError(f"尝试次数至少为 1: {attempts}")
 
         def register(handler: Handler) -> Handler:
-            self.handlers[kind] = handler
-            self.attempts[kind] = attempts
+            self._handlers[kind] = handler
+            self._attempts[kind] = attempts
             if concurrency is None:
-                self.concurrency.pop(kind, None)
+                self._concurrency.pop(kind, None)
             else:
-                self.concurrency[kind] = concurrency
+                self._concurrency[kind] = concurrency
             return handler
 
         return register
@@ -74,19 +74,19 @@ class Queue:
         - payload: 可 JSON 序列化的输入
         """
 
-        if not self.open:
+        if not self._open:
             raise RuntimeError("队列未启动")
-        if kind not in self.handlers:
+        if kind not in self._handlers:
             raise KeyError(f"未注册的差事类型: {kind}")
         job = Job(uuid4().hex, kind, payload, created_at=datetime.now(UTC))
-        self.connected().insert(job)
-        self.start(job)
+        self._connected().insert(job)
+        self._start(job)
         return job.id
 
     def get(self, id: str) -> Job | None:
         """查询一件差事的当前快照"""
 
-        return self.connected().get(id)
+        return self._connected().get(id)
 
     def running(self) -> list[Job]:
         """未到终态的差事快照, 按提交顺序
@@ -94,50 +94,50 @@ class Queue:
         包括被中断后等待下次启动重跑的差事, 不保证每件都正在执行
         """
 
-        return self.connected().running()
+        return self._connected().running()
 
     async def __aenter__(self) -> Self:
         """打开数据库并重跑上次未办完的差事"""
 
-        if self.store is not None:
+        if self._store is not None:
             raise RuntimeError("队列已启动")
-        self.store = Store(self.path)
-        self.slots = {kind: asyncio.Semaphore(limit) for kind, limit in self.concurrency.items()}
-        self.open = True
-        for job in self.store.running():
-            self.start(job)
+        self._store = Store(self.path)
+        self._slots = {kind: asyncio.Semaphore(limit) for kind, limit in self._concurrency.items()}
+        self._open = True
+        for job in self._store.running():
+            self._start(job)
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
         """取消在办的差事并关闭数据库, 这些差事保持 running 状态等待下次启动重跑"""
 
-        self.open = False
-        tasks = list(self.tasks)
+        self._open = False
+        tasks = list(self._tasks)
         for task in tasks:
             task.cancel()
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
         finally:
-            self.connected().close()
-            self.store = None
+            self._connected().close()
+            self._store = None
 
-    def connected(self) -> Store:
+    def _connected(self) -> Store:
         """当前打开的存储, 不在 async with 中时报错"""
 
-        if self.store is None:
+        if self._store is None:
             raise RuntimeError("队列未启动")
-        return self.store
+        return self._store
 
-    def start(self, job: Job) -> None:
-        task = asyncio.create_task(self.run(job), name=f"errand-{job.kind}-{job.id}")
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
+    def _start(self, job: Job) -> None:
+        task = asyncio.create_task(self._run(job), name=f"errand-{job.kind}-{job.id}")
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
-    async def run(self, job: Job) -> None:
+    async def _run(self, job: Job) -> None:
         """办理一件差事并落下结果, 失败且还有剩余次数时退避重试, 退避期间不占并发名额"""
 
-        handler = self.handlers[job.kind]
-        slot = self.slots.get(job.kind)
+        handler = self._handlers[job.kind]
+        slot = self._slots.get(job.kind)
         while True:
             try:
                 if slot is None:
@@ -145,13 +145,13 @@ class Queue:
                 else:
                     async with slot:
                         result = await handler(job)
-                self.connected().finish(job.id, result)
+                self._connected().finish(job.id, result)
                 return
             except Exception as error:
-                failures = self.connected().count_failure(job.id)
-                if failures >= self.attempts[job.kind]:
+                failures = self._connected().count_failure(job.id)
+                if failures >= self._attempts[job.kind]:
                     logger.exception("差事失败: id=%s kind=%s failures=%d", job.id, job.kind, failures)
-                    self.connected().fail(job.id, f"{type(error).__name__}: {error}")
+                    self._connected().fail(job.id, f"{type(error).__name__}: {error}")
                     return
                 logger.warning("差事失败, 稍后重试: id=%s kind=%s failures=%d", job.id, job.kind, failures, exc_info=True)
             await asyncio.sleep(backoff(failures))
