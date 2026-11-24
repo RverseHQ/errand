@@ -57,6 +57,7 @@ bounds it.
 | API | Purpose |
 | --- | --- |
 | `Queue(path)` | Create a queue backed by a SQLite file, opened on enter. |
+| `queue.path` | The SQLite file the queue was created with. |
 | `@queue.handler(kind, concurrency=None, attempts=1)` | Register an async handler for a kind of job. With a limit, at most that many jobs of the kind run at once and the rest wait in submission order. With more than one attempt, a failed job stays `running`, backs off without holding its slot, and runs again until it succeeds or the attempts run out. |
 | `queue.submit(kind, payload)` | Persist a job, start it, and return its id. |
 | `queue.get(id)` | Read a snapshot of a job, or `None`. |
