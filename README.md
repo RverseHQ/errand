@@ -8,6 +8,10 @@
 
 ## Design
 
+A job is a coroutine that leaves a record: found by name, written before it runs,
+ending done or failed, and rerun from the start if it never ended. `errand`
+remembers it; it does not schedule it.
+
 `errand` is built around a small idea: work that was accepted should not disappear
 when the process does. A job is written to SQLite before it starts, runs as a task
 on the event loop you already have, and runs again from the beginning if the
