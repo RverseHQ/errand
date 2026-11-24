@@ -22,10 +22,12 @@ def test_running_lists_unfinished_in_submission_order(tmp_path: Path) -> None:
 
         assert [job.id for job in store.running()] == ["c"]
         a, b = store.get("a"), store.get("b")
-        assert a is not None and b is not None
+        assert a is not None
+        assert b is not None
         assert (a.status, a.result, a.error) == (Status.DONE, [1, 2], None)
         assert (b.status, b.result, b.error) == (Status.FAILED, None, "RuntimeError: boom")
-        assert a.finished_at is not None and b.finished_at is not None
+        assert a.finished_at is not None
+        assert b.finished_at is not None
 
 
 def test_persists_across_connections(tmp_path: Path) -> None:

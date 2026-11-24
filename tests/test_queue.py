@@ -63,7 +63,8 @@ def test_unencodable_result_fails_instead_of_hanging(tmp_path: Path) -> None:
         async with queue:
             job = await settle(queue, queue.submit("odd", None))
             assert job.status is Status.FAILED
-            assert job.error is not None and job.error.startswith("TypeError")
+            assert job.error is not None
+            assert job.error.startswith("TypeError")
 
     asyncio.run(main())
 
@@ -73,14 +74,17 @@ def test_records_timestamps_in_utc(tmp_path: Path) -> None:
 
     @queue.handler("echo")
     async def echo(job: Job) -> object:
-        assert job.created_at is not None and job.finished_at is None
+        assert job.created_at is not None
+        assert job.finished_at is None
         return job.payload
 
     async def main() -> None:
         async with queue:
             job = await settle(queue, queue.submit("echo", 1))
-            assert job.created_at is not None and job.finished_at is not None
-            assert job.created_at.tzinfo is UTC and job.created_at <= job.finished_at
+            assert job.created_at is not None
+            assert job.finished_at is not None
+            assert job.created_at.tzinfo is UTC
+            assert job.created_at <= job.finished_at
 
     asyncio.run(main())
 
@@ -110,6 +114,7 @@ def test_upgrades_database_without_timestamps(tmp_path: Path) -> None:
 
 def test_interrupted_job_reruns_after_restart(tmp_path: Path) -> None:
     runs: list[str] = []
+    started = asyncio.Event()
 
     def build(block: bool) -> Queue:
         queue = Queue(tmp_path / "q.db")
@@ -117,6 +122,7 @@ def test_interrupted_job_reruns_after_restart(tmp_path: Path) -> None:
         @queue.handler("long")
         async def long(job: Job) -> str:
             runs.append(job.id)
+            started.set()
             if block:
                 await asyncio.sleep(3600)
             return "ok"
@@ -127,10 +133,10 @@ def test_interrupted_job_reruns_after_restart(tmp_path: Path) -> None:
         queue = build(block=True)
         async with queue:
             id = queue.submit("long", None)
-            while not runs:
-                await asyncio.sleep(0.01)
+            await started.wait()
             job = queue.get(id)
-            assert job is not None and job.status is Status.RUNNING
+            assert job is not None
+            assert job.status is Status.RUNNING
         return id
 
     async def second(id: str) -> None:
@@ -205,7 +211,7 @@ def test_closes_database_on_exit_and_reopens_on_enter(tmp_path: Path) -> None:
                     pass
         with pytest.raises(RuntimeError):
             queue.get(id)
-        for file in tmp_path.iterdir():
+        for file in tmp_path.iterdir():  # noqa: ASYNC240
             file.unlink()
         async with queue:
             assert queue.get(id) is None
@@ -285,7 +291,7 @@ def test_recovery_respects_concurrency(tmp_path: Path) -> None:
 
 
 def test_rejects_concurrency_below_one(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="并发上限至少为 1"):
         Queue(tmp_path / "q.db").handler("bad", concurrency=0)
 
 
@@ -345,7 +351,8 @@ def test_backoff_releases_concurrency_slot(tmp_path: Path, monkeypatch: pytest.M
             down = queue.submit("call", "down")
             assert (await settle(queue, queue.submit("call", "up"))).result == "up"
             job = queue.get(down)
-            assert job is not None and job.status is Status.RUNNING
+            assert job is not None
+            assert job.status is Status.RUNNING
 
     asyncio.run(main())
 
@@ -353,6 +360,7 @@ def test_backoff_releases_concurrency_slot(tmp_path: Path, monkeypatch: pytest.M
 def test_attempts_survive_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("errand.queue.backoff", lambda failures: 0 if failures < 2 else 3600)
     calls = 0
+    second_failed = asyncio.Event()
 
     def build() -> Queue:
         queue = Queue(tmp_path / "q.db")
@@ -361,6 +369,8 @@ def test_attempts_survive_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         async def boom(job: Job) -> None:
             nonlocal calls
             calls += 1
+            if calls == 2:
+                second_failed.set()
             raise RuntimeError(calls)
 
         return queue
@@ -369,8 +379,7 @@ def test_attempts_survive_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         queue = build()
         async with queue:
             id = queue.submit("boom", None)
-            while calls < 2:
-                await asyncio.sleep(0.01)
+            await second_failed.wait()
         return id
 
     async def second(id: str) -> None:
@@ -418,5 +427,5 @@ def test_backoff_doubles_up_to_an_hour() -> None:
 
 
 def test_rejects_attempts_below_one(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="尝试次数至少为 1"):
         Queue(tmp_path / "q.db").handler("bad", attempts=0)
