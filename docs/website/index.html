@@ -609,13 +609,20 @@ asyncio.run(restart(asyncio.run(crash())))</code></pre>
         <h2 class="h-doc h-doc-2" data-i18n="compose.title">COMPOSING PRIMITIVES</h2>
         <div class="copy">
           <p data-i18n-html="compose.copy1"></p>
+          <p data-i18n-html="compose.copy2"></p>
         </div>
         <div class="code-wrap">
           <pre class="code-block"><code>def submit_once(payload: dict) -&gt; str:
     for job in queue.running():
         if job.kind == "summarize" and job.payload == payload:
             return job.id
-    return queue.submit("summarize", payload)</code></pre>
+    return queue.submit("summarize", payload)
+
+
+@queue.handler("summarize", attempts=3)
+async def summarize(job: Job) -&gt; str:
+    async with asyncio.timeout(60):
+        return await llm(job.payload["text"])</code></pre>
           <div class="callout" data-i18n="compose.callout"></div>
         </div>
       </section>

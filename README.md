@@ -40,17 +40,20 @@ cleanly. It stays minimal and grows only with real need.
 Every addition starts from a real need of a service, and the core takes the smallest
 shape that meets it. A need is judged in this order:
 
-1. If it is task queue design consensus, it goes into the core.
+1. If it is task queue design consensus, and the reason queues share it holds for
+   errand, it goes into the core.
 2. Otherwise, if the existing API or primitives can express it, the service composes
    it, as in [Composing primitives](#composing-primitives).
 3. Otherwise, if only one service needs it, it stays in that service.
 4. Otherwise, when several services share it, its leverage is weighed case by case,
    and it may go into the core.
 
-Being composable is not a reason to reject a consensus primitive. Per-kind
-concurrency limits can be written as a semaphore in each handler, but every task
-queue offers them, and recovery is what releases a backlog all at once, so the queue
-bounds it.
+Being composable is not a reason to reject a consensus primitive whose reason holds.
+Per-kind concurrency limits can be written as a semaphore in each handler, but every
+task queue offers them, and recovery is what releases a backlog all at once, so the
+queue bounds it. Timeouts are consensus too, but other queues offer them because a
+handler running in a worker process or thread cannot stop itself. A handler on the
+event loop can, so timeouts are composed.
 
 ## API
 
@@ -247,6 +250,36 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+A timeout is composed the same way. The handler bounds itself with `asyncio.timeout`,
+and the `TimeoutError` it raises is an ordinary failure, so `attempts` and the backoff
+apply to it, and the limit covers each attempt.
+
+```python
+import asyncio
+
+from errand import Job, Queue, Status
+
+queue = Queue("errand.db")
+
+
+@queue.handler("summarize")
+async def summarize(job: Job) -> str:
+    async with asyncio.timeout(0.1):
+        await asyncio.sleep(3600)
+        return job.payload["text"][:10]
+
+
+async def main() -> None:
+    async with queue:
+        id = queue.submit("summarize", {"text": "a long document"})
+        await asyncio.sleep(0.2)
+
+        assert queue.get(id).status is Status.FAILED
+
+
+asyncio.run(main())
+```
+
 ### Recovery
 
 ```python
@@ -331,7 +364,6 @@ Added when a real workload needs them, not before.
 
 Execution:
 
-- timeouts
 - a file lock that enforces one process per database
 
 Submission:

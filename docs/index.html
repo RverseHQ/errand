@@ -728,13 +728,20 @@ asyncio.run(restart(asyncio.run(crash())))</code></pre>
         <h2 class="h-doc h-doc-2" data-i18n="compose.title">COMPOSING PRIMITIVES</h2>
         <div class="copy">
           <p data-i18n-html="compose.copy1"></p>
+          <p data-i18n-html="compose.copy2"></p>
         </div>
         <div class="code-wrap">
           <pre class="code-block"><code>def submit_once(payload: dict) -&gt; str:
     for job in queue.running():
         if job.kind == "summarize" and job.payload == payload:
             return job.id
-    return queue.submit("summarize", payload)</code></pre>
+    return queue.submit("summarize", payload)
+
+
+@queue.handler("summarize", attempts=3)
+async def summarize(job: Job) -&gt; str:
+    async with asyncio.timeout(60):
+        return await llm(job.payload["text"])</code></pre>
           <div class="callout" data-i18n="compose.callout"></div>
         </div>
       </section>
@@ -898,7 +905,8 @@ const translations = {
     "recovery.callout": "one process per database file. nothing locks it for you yet.",
     "compose.title": "COMPOSING PRIMITIVES",
     "compose.copy1": 'Requirements of one service are built from the primitives. This reuses an unfinished job for an identical request instead of starting another; what counts as identical is the service\'s decision. <span class="ic">running()</span> includes jobs still waiting for a slot and jobs interrupted before a restart.',
-    "compose.callout": "consensus primitives go into the core. everything else is composed.",
+    "compose.copy2": 'A timeout is composed the same way. Other queues stop a handler from outside because it runs in a worker process or thread; a handler on the event loop bounds itself with <span class="ic">asyncio.timeout</span>, and the <span class="ic">TimeoutError</span> is an ordinary failure that attempts and the backoff apply to.',
+    "compose.callout": "consensus primitives go into the core when their reason holds here. everything else is composed.",
     "api.title": "ONE SMALL SURFACE",
     "api.copy1": "The public API is a queue, a decorator and two read paths. Times are UTC.",
     "api.table.api": "API",
@@ -915,7 +923,7 @@ const translations = {
     "web.copy1": 'Hand the queue to your framework\'s lifespan. Requests <span class="ic">submit</span> and <span class="ic">get</span>; the jobs outlive the request and come back after a restart.',
     "roadmap.title": "ROADMAP",
     "roadmap.copy1": "Added when a real workload needs them, not before.",
-    "roadmap.item1": '<span class="ic">execution</span> - timeouts, a file lock that enforces one process per database',
+    "roadmap.item1": '<span class="ic">execution</span> - a file lock that enforces one process per database',
     "roadmap.item2": '<span class="ic">submission</span> - idempotent ids, delayed jobs, submission from other threads',
     "roadmap.item3": '<span class="ic">storage</span> - retention of finished jobs',
     "footer.desk": "DESK",
@@ -978,7 +986,8 @@ const translations = {
     "recovery.callout": "一个数据库文件只给一个进程。目前还没有替你加锁。",
     "compose.title": "组合原语",
     "compose.copy1": '单个服务的需求由原语组合而成。下面的例子对相同的请求复用一个未完成的差事，而不是再起一个；什么算相同由服务决定。<span class="ic">running()</span> 包括仍在等待名额的差事，以及重启前被中断的差事。',
-    "compose.callout": "共识原语进入核心。其余的都靠组合。",
+    "compose.copy2": '超时也是这样组合的。其他队列的处理函数跑在工作进程或线程里，只能从外部叫停；事件循环上的处理函数用 <span class="ic">asyncio.timeout</span> 自己设限，抛出的 <span class="ic">TimeoutError</span> 是一次普通的失败，同样适用尝试次数和退避。',
+    "compose.callout": "理由在这里同样成立的共识原语进入核心。其余的都靠组合。",
     "api.title": "小而完整的 API",
     "api.copy1": "公共 API 只有一个队列、一个装饰器和两条读取路径。时间均为 UTC。",
     "api.table.api": "API",
@@ -995,7 +1004,7 @@ const translations = {
     "web.copy1": '把队列交给框架的 lifespan。请求只负责 <span class="ic">submit</span> 和 <span class="ic">get</span>；差事比请求活得更久，重启之后也会回来。',
     "roadmap.title": "路线图",
     "roadmap.copy1": "在真实负载需要时才加入，不提前。",
-    "roadmap.item1": '<span class="ic">执行</span> - 超时、保证每个数据库只有一个进程的文件锁',
+    "roadmap.item1": '<span class="ic">执行</span> - 保证每个数据库只有一个进程的文件锁',
     "roadmap.item2": '<span class="ic">提交</span> - 幂等 id、延迟差事、从其他线程提交',
     "roadmap.item3": '<span class="ic">存储</span> - 已完成差事的保留策略',
     "footer.desk": "调度台",
@@ -1058,7 +1067,8 @@ const translations = {
     "recovery.callout": "データベースファイルひとつにプロセスひとつ。まだ自動ではロックしません。",
     "compose.title": "プリミティブを組み合わせる",
     "compose.copy1": 'サービスごとの要件はプリミティブから組み立てます。この例は同じリクエストに対して未完了のジョブを再利用し、新しく起こしません。何を同じとみなすかはサービスが決めます。<span class="ic">running()</span> には枠を待っているジョブと、再起動前に中断されたジョブも含まれます。',
-    "compose.callout": "合意のあるプリミティブはコアへ。それ以外は組み合わせで。",
+    "compose.copy2": 'タイムアウトも同じように組み立てます。他のキューではハンドラがワーカープロセスやスレッドで動くため外から止めるしかありません。イベントループ上のハンドラは <span class="ic">asyncio.timeout</span> で自分を制限でき、送出される <span class="ic">TimeoutError</span> は通常の失敗として試行回数とバックオフの対象になります。',
+    "compose.callout": "理由がここでも成り立つ合意のあるプリミティブはコアへ。それ以外は組み合わせで。",
     "api.title": "小さくまとまった API",
     "api.copy1": "公開 API はキューひとつ、デコレータひとつ、読み取り経路二つです。時刻は UTC です。",
     "api.table.api": "API",
@@ -1075,7 +1085,7 @@ const translations = {
     "web.copy1": 'キューはフレームワークの lifespan に渡します。リクエストは <span class="ic">submit</span> と <span class="ic">get</span> だけ。ジョブはリクエストより長く生き、再起動後に戻ってきます。',
     "roadmap.title": "ロードマップ",
     "roadmap.copy1": "実際の負荷が必要としたときに追加します。先回りはしません。",
-    "roadmap.item1": '<span class="ic">実行</span> - タイムアウト、データベースごとに一プロセスを強制するファイルロック',
+    "roadmap.item1": '<span class="ic">実行</span> - データベースごとに一プロセスを強制するファイルロック',
     "roadmap.item2": '<span class="ic">投入</span> - 冪等な id、遅延ジョブ、他スレッドからの投入',
     "roadmap.item3": '<span class="ic">保存</span> - 完了したジョブの保持期間',
     "footer.desk": "配車台",
@@ -1138,7 +1148,8 @@ const translations = {
     "recovery.callout": "один процесс на файл базы. пока ничто не блокирует его за вас.",
     "compose.title": "КОМПОЗИЦИЯ ПРИМИТИВОВ",
     "compose.copy1": 'Требования одного сервиса строятся из примитивов. Здесь для одинакового запроса переиспользуется незавершенное задание вместо запуска нового; что считать одинаковым, решает сервис. <span class="ic">running()</span> включает задания, ждущие слота, и прерванные до перезапуска.',
-    "compose.callout": "общепринятые примитивы идут в ядро. остальное собирается из них.",
+    "compose.copy2": 'Таймаут собирается так же. В других очередях обработчик работает в процессе или потоке воркера, и остановить его можно только снаружи; обработчик в цикле событий ограничивает себя сам через <span class="ic">asyncio.timeout</span>, а <span class="ic">TimeoutError</span> — обычный сбой, к которому применяются попытки и задержка.',
+    "compose.callout": "общепринятые примитивы идут в ядро, если их причина верна и здесь. остальное собирается из них.",
     "api.title": "НЕБОЛЬШАЯ ПОВЕРХНОСТЬ API",
     "api.copy1": "Публичный API - это очередь, декоратор и два пути чтения. Время в UTC.",
     "api.table.api": "API",
@@ -1155,7 +1166,7 @@ const translations = {
     "web.copy1": 'Передайте очередь в lifespan фреймворка. Запросы только вызывают <span class="ic">submit</span> и <span class="ic">get</span>; задания живут дольше запроса и возвращаются после перезапуска.',
     "roadmap.title": "ПЛАН",
     "roadmap.copy1": "Добавляется, когда этого требует реальная нагрузка, не раньше.",
-    "roadmap.item1": '<span class="ic">выполнение</span> - таймауты, файловая блокировка: один процесс на базу',
+    "roadmap.item1": '<span class="ic">выполнение</span> - файловая блокировка: один процесс на базу',
     "roadmap.item2": '<span class="ic">подача</span> - идемпотентные id, отложенные задания, подача из других потоков',
     "roadmap.item3": '<span class="ic">хранение</span> - срок хранения завершенных заданий',
     "footer.desk": "ПУЛЬТ",
@@ -1218,7 +1229,8 @@ const translations = {
     "recovery.callout": "un processus par fichier de base. rien ne le verrouille encore pour vous.",
     "compose.title": "COMPOSER LES PRIMITIVES",
     "compose.copy1": 'Les besoins d un service se construisent avec les primitives. Ici, un job inachevé est réutilisé pour une requête identique au lieu d en lancer un autre ; ce qui compte comme identique est une décision du service. <span class="ic">running()</span> inclut les jobs qui attendent une place et ceux interrompus avant un redémarrage.',
-    "compose.callout": "les primitives consensuelles vont dans le coeur. le reste se compose.",
+    "compose.copy2": 'Un timeout se compose de la même façon. Les autres files arrêtent un handler de l extérieur parce qu il tourne dans un processus ou un thread worker ; un handler sur la boucle d événements se borne lui-même avec <span class="ic">asyncio.timeout</span>, et la <span class="ic">TimeoutError</span> est un échec ordinaire soumis aux tentatives et au backoff.',
+    "compose.callout": "les primitives consensuelles vont dans le coeur quand leur raison tient ici. le reste se compose.",
     "api.title": "UNE PETITE SURFACE",
     "api.copy1": "L API publique, c est une file, un décorateur et deux chemins de lecture. Les heures sont en UTC.",
     "api.table.api": "API",
@@ -1235,7 +1247,7 @@ const translations = {
     "web.copy1": 'Confiez la file au lifespan de votre framework. Les requêtes appellent <span class="ic">submit</span> et <span class="ic">get</span> ; les jobs survivent à la requête et reviennent après un redémarrage.',
     "roadmap.title": "FEUILLE DE ROUTE",
     "roadmap.copy1": "Ajouté quand une vraie charge en a besoin, pas avant.",
-    "roadmap.item1": '<span class="ic">exécution</span> - timeouts, un verrou de fichier imposant un processus par base',
+    "roadmap.item1": '<span class="ic">exécution</span> - un verrou de fichier imposant un processus par base',
     "roadmap.item2": '<span class="ic">soumission</span> - ids idempotents, jobs différés, soumission depuis d autres threads',
     "roadmap.item3": '<span class="ic">stockage</span> - rétention des jobs terminés',
     "footer.desk": "PUPITRE",
@@ -1298,7 +1310,8 @@ const translations = {
     "recovery.callout": "ein Prozess pro Datenbankdatei. noch sperrt nichts sie für dich.",
     "compose.title": "PRIMITIVE KOMBINIEREN",
     "compose.copy1": 'Anforderungen eines Dienstes werden aus den Primitiven gebaut. Hier wird für eine identische Anfrage ein unfertiger Job wiederverwendet statt ein neuer gestartet; was als identisch gilt, entscheidet der Dienst. <span class="ic">running()</span> enthält Jobs, die auf einen Platz warten, und solche, die vor einem Neustart unterbrochen wurden.',
-    "compose.callout": "Konsens-Primitive kommen in den Kern. Alles andere wird kombiniert.",
+    "compose.copy2": 'Ein Timeout wird genauso kombiniert. Andere Queues stoppen einen Handler von außen, weil er in einem Worker-Prozess oder -Thread läuft; ein Handler auf der Event-Loop begrenzt sich selbst mit <span class="ic">asyncio.timeout</span>, und der <span class="ic">TimeoutError</span> ist ein gewöhnlicher Fehlschlag, für den Versuche und Backoff gelten.',
+    "compose.callout": "Konsens-Primitive kommen in den Kern, wenn ihr Grund auch hier gilt. Alles andere wird kombiniert.",
     "api.title": "EINE KLEINE OBERFLÄCHE",
     "api.copy1": "Die öffentliche API ist eine Queue, ein Dekorator und zwei Lesewege. Zeiten sind UTC.",
     "api.table.api": "API",
@@ -1315,7 +1328,7 @@ const translations = {
     "web.copy1": 'Gib die Queue an den Lifespan deines Frameworks. Requests rufen nur <span class="ic">submit</span> und <span class="ic">get</span>; die Jobs überleben den Request und kommen nach einem Neustart zurück.',
     "roadmap.title": "ROADMAP",
     "roadmap.copy1": "Kommt dazu, wenn eine echte Last es braucht, nicht vorher.",
-    "roadmap.item1": '<span class="ic">Ausführung</span> - Timeouts, ein Dateilock für einen Prozess pro Datenbank',
+    "roadmap.item1": '<span class="ic">Ausführung</span> - ein Dateilock für einen Prozess pro Datenbank',
     "roadmap.item2": '<span class="ic">Einreichung</span> - idempotente ids, verzögerte Jobs, Einreichen aus anderen Threads',
     "roadmap.item3": '<span class="ic">Speicherung</span> - Aufbewahrung fertiger Jobs',
     "footer.desk": "PULT",
@@ -1378,7 +1391,8 @@ const translations = {
     "recovery.callout": "데이터베이스 파일 하나에 프로세스 하나. 아직 자동으로 잠그지는 않습니다.",
     "compose.title": "원시 기능 조합하기",
     "compose.copy1": '한 서비스의 요구 사항은 원시 기능으로 만듭니다. 이 예는 같은 요청에 대해 새로 시작하지 않고 끝나지 않은 작업을 재사용합니다. 무엇이 같은지는 서비스가 정합니다. <span class="ic">running()</span>에는 자리를 기다리는 작업과 재시작 전에 중단된 작업도 포함됩니다.',
-    "compose.callout": "합의된 원시 기능은 코어로. 나머지는 조합으로.",
+    "compose.copy2": '타임아웃도 같은 방식으로 조합합니다. 다른 큐는 핸들러가 워커 프로세스나 스레드에서 돌기 때문에 밖에서 멈춰야 합니다. 이벤트 루프 위의 핸들러는 <span class="ic">asyncio.timeout</span>으로 스스로 제한하고, 발생한 <span class="ic">TimeoutError</span>는 시도 횟수와 백오프가 적용되는 평범한 실패입니다.',
+    "compose.callout": "이유가 여기서도 성립하는 합의된 원시 기능은 코어로. 나머지는 조합으로.",
     "api.title": "작고 완결된 API",
     "api.copy1": "공개 API는 큐 하나, 데코레이터 하나, 읽기 경로 두 개입니다. 시간은 UTC입니다.",
     "api.table.api": "API",
@@ -1395,7 +1409,7 @@ const translations = {
     "web.copy1": '큐를 프레임워크의 lifespan에 맡기세요. 요청은 <span class="ic">submit</span>과 <span class="ic">get</span>만 합니다. 작업은 요청보다 오래 살고 재시작 후에 돌아옵니다.',
     "roadmap.title": "로드맵",
     "roadmap.copy1": "실제 부하가 필요로 할 때 추가합니다. 미리 하지 않습니다.",
-    "roadmap.item1": '<span class="ic">실행</span> - 타임아웃, 데이터베이스당 프로세스 하나를 강제하는 파일 잠금',
+    "roadmap.item1": '<span class="ic">실행</span> - 데이터베이스당 프로세스 하나를 강제하는 파일 잠금',
     "roadmap.item2": '<span class="ic">제출</span> - 멱등 id, 지연 작업, 다른 스레드에서의 제출',
     "roadmap.item3": '<span class="ic">저장</span> - 완료된 작업의 보존 기간',
     "footer.desk": "배차대",
